@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "vending_machine.c"
+    INCLUDE_DIRS
+        "."
+        "../components/ble"
+        "../components/servo"
+        "../components/oled"
+        "../components/ir_sensor"
+        "../components/led"
+    REQUIRES
+        nvs_flash
+        bt
+        esp_bt
+        driver
+        esp_timer
+        i2c
+        ledc
+)

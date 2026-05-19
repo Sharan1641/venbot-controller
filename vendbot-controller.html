@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VendBot Controller</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap');
+
+  :root {
+    --bg:       #0a0c0f;
+    --panel:    #111418;
+    --border:   #1e2530;
+    --accent:   #00e5a0;
+    --warn:     #ff9500;
+    --danger:   #ff3c3c;
+    --blue:     #3dd6f5;
+    --dim:      #3a4555;
+    --text:     #c8d8e8;
+    --text-dim: #5a6880;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 999; pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+  }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .logo {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.4rem;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--text-dim); }
+
+  #ble-status {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  #ble-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--dim);
+    box-shadow: 0 0 0 0 transparent;
+    transition: all 0.3s;
+  }
+  #ble-dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  #ble-dot.scanning  { background: var(--blue);   animation: blink 0.6s infinite; }
+  #ble-dot.error     { background: var(--danger);  box-shadow: 0 0 8px var(--danger); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* Main layout */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    grid-template-rows: auto auto;
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  /* Section label */
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* Panel */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+  }
+
+  /* Slot grid */
+  #slot-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .slot-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.1s;
+    position: relative;
+    overflow: hidden;
+  }
+  .slot-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--dim);
+    transition: background 0.2s;
+  }
+  .slot-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .slot-card:hover::before { background: var(--accent); }
+  .slot-card.selected { border-color: var(--accent); }
+  .slot-card.selected::before { background: var(--accent); }
+  .slot-card.empty { opacity: 0.4; cursor: not-allowed; }
+  .slot-card.empty::before { background: var(--danger); }
+
+  .slot-num {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .slot-name {
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .slot-price {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    color: var(--accent);
+  }
+  .slot-stock {
+    position: absolute; bottom: 10px; right: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+  }
+  .slot-stock.low { color: var(--warn); }
+  .slot-stock.empty { color: var(--danger); }
+
+  /* Stock bar */
+  .stock-bar {
+    margin-top: 8px;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .stock-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.4s;
+  }
+  .stock-fill.low   { background: var(--warn); }
+  .stock-fill.empty { background: var(--danger); width: 0 !important; }
+
+  /* Right panel */
+  #right-panel { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 16px; }
+
+  /* Status panel */
+  #status-display {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.8;
+    color: var(--text-dim);
+  }
+  #status-display .val { color: var(--accent); }
+  #status-display .err { color: var(--danger); }
+
+  /* Action button */
+  #dispense-btn {
+    width: 100%;
+    padding: 18px;
+    background: transparent;
+    border: 2px solid var(--accent);
+    border-radius: 4px;
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  #dispense-btn::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s;
+    z-index: 0;
+  }
+  #dispense-btn:hover::before { transform: scaleX(1); }
+  #dispense-btn:hover { color: var(--bg); }
+  #dispense-btn span { position: relative; z-index: 1; }
+  #dispense-btn:disabled {
+    border-color: var(--dim);
+    color: var(--dim);
+    cursor: not-allowed;
+  }
+  #dispense-btn:disabled::before { display: none; }
+
+  #connect-btn {
+    width: 100%;
+    padding: 12px;
+    background: transparent;
+    border: 1px solid var(--blue);
+    border-radius: 4px;
+    color: var(--blue);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  #connect-btn:hover { background: rgba(61,214,245,0.1); }
+
+  /* Admin panel */
+  #admin-section summary {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    color: var(--warn);
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0;
+  }
+  #admin-section[open] summary { margin-bottom: 12px; }
+
+  .admin-row {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+  }
+  .admin-row label {
+    font-size: 0.8rem; color: var(--text-dim);
+    white-space: nowrap; min-width: 70px;
+  }
+  .admin-row input, .admin-row select {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.8rem;
+    padding: 5px 8px;
+    outline: none;
+  }
+  .admin-row input:focus, .admin-row select:focus { border-color: var(--warn); }
+
+  .admin-btn {
+    padding: 7px 12px;
+    border: 1px solid var(--warn);
+    background: transparent;
+    border-radius: 3px;
+    color: var(--warn);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .admin-btn:hover { background: rgba(255,149,0,0.15); }
+
+  /* Log */
+  #log-panel {
+    grid-column: 1;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  #log-entries {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .log-entry { display: flex; gap: 8px; }
+  .log-entry .ts { color: var(--dim); }
+  .log-entry.ok  .msg { color: var(--accent); }
+  .log-entry.err .msg { color: var(--danger); }
+  .log-entry.warn .msg { color: var(--warn); }
+  .log-entry.info .msg { color: var(--blue); }
+
+  /* State indicator bar */
+  #state-bar {
+    display: flex; gap: 6px; margin-top: 10px;
+  }
+  .state-pip {
+    flex: 1; height: 3px; border-radius: 2px;
+    background: var(--border);
+    transition: background 0.3s;
+  }
+  .state-pip.active { background: var(--accent); }
+  .state-pip.error  { background: var(--danger); }
+  .state-pip.warn   { background: var(--warn); }
+
+  /* Demo mode badge */
+  #demo-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 3px;
+    padding: 2px 6px;
+  }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    main { grid-template-columns: 1fr; }
+    #right-panel { grid-column: 1; grid-row: auto; }
+    #slot-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VEND<span>BOT</span> // ESP32</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="demo-badge">DEMO MODE</span>
+    <div id="ble-status">
+      <div id="ble-dot"></div>
+      <span id="ble-label">DISCONNECTED</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- Slot Grid -->
+  <div class="panel">
+    <div class="section-label">// SELECT SLOT</div>
+    <div id="slot-grid"></div>
+  </div>
+
+  <!-- Right Panel -->
+  <div id="right-panel">
+
+    <!-- Connect -->
+    <div class="panel">
+      <div class="section-label">// BLE CONNECTION</div>
+      <button id="connect-btn" onclick="toggleBLE()">SCAN &amp; CONNECT</button>
+    </div>
+
+    <!-- Status -->
+    <div class="panel">
+      <div class="section-label">// MACHINE STATUS</div>
+      <div id="status-display">
+        STATE   : <span class="val" id="s-state">IDLE</span><br>
+        SLOT    : <span class="val" id="s-slot">—</span><br>
+        ERROR   : <span class="val" id="s-error">NONE</span><br>
+        TOTAL Σ : <span class="val" id="s-total">0</span><br>
+        ADMIN   : <span class="val" id="s-admin">LOCKED</span>
+      </div>
+      <div id="state-bar">
+        <div class="state-pip active" id="pip-idle"></div>
+        <div class="state-pip" id="pip-sel"></div>
+        <div class="state-pip" id="pip-disp"></div>
+        <div class="state-pip" id="pip-ok"></div>
+        <div class="state-pip" id="pip-err"></div>
+      </div>
+    </div>
+
+    <!-- Dispense -->
+    <button id="dispense-btn" disabled onclick="sendDispense()">
+      <span>⬡ DISPENSE</span>
+    </button>
+
+    <!-- Admin -->
+    <div class="panel">
+      <details id="admin-section">
+        <summary>▶ ADMIN PANEL</summary>
+
+        <div class="admin-row">
+          <label>PIN</label>
+          <input id="admin-pin" type="password" maxlength="4" placeholder="••••">
+          <button class="admin-btn" onclick="sendAuth()">AUTH</button>
+        </div>
+
+        <div class="admin-row">
+          <label>Slot</label>
+          <select id="admin-slot">
+            <option value="0">1</option><option value="1">2</option>
+            <option value="2">3</option><option value="3">4</option>
+            <option value="4">5</option><option value="5">6</option>
+          </select>
+        </div>
+
+        <div class="admin-row">
+          <label>Restock</label>
+          <input id="admin-count" type="number" min="0" max="20" value="5">
+          <button class="admin-btn" onclick="sendRestock()">SET</button>
+        </div>
+
+        <div class="admin-row">
+          <label>Price ¢</label>
+          <input id="admin-price" type="number" min="0" value="150">
+          <button class="admin-btn" onclick="sendPrice()">SET</button>
+        </div>
+
+        <div class="admin-row" style="margin-top:8px">
+          <button class="admin-btn" style="flex:1" onclick="sendAdminCmd(3)">RESET ERR</button>
+          <button class="admin-btn" style="flex:1;border-color:var(--danger);color:var(--danger)" onclick="sendAdminCmd(4)">LOCK</button>
+          <button class="admin-btn" style="flex:1" onclick="sendAdminCmd(5)">UNLOCK</button>
+        </div>
+      </details>
+    </div>
+
+  </div>
+
+  <!-- Log -->
+  <div class="panel" id="log-panel">
+    <div class="section-label">// EVENT LOG</div>
+    <div id="log-entries"></div>
+  </div>
+
+</main>
+
+<script>
+// ─── Demo State ────────────────────────────────────────────────────────────
+
+const SLOTS = [
+  { name: 'Cola',   price: 150, count: 5 },
+  { name: 'Water',  price: 100, count: 3 },
+  { name: 'Chips',  price: 200, count: 0 },
+  { name: 'Candy',  price: 125, count: 5 },
+  { name: 'Cookie', price: 175, count: 1 },
+  { name: 'Juice',  price: 175, count: 5 },
+];
+
+let vmState = {
+  state: 'IDLE',      // IDLE | SELECTED | DISPENSING | DISPENSED | ERROR | ADMIN
+  selectedSlot: null,
+  error: 'NONE',
+  total: 0,
+  adminUnlocked: false,
+  connected: false,
+};
+
+// ─── BLE ──────────────────────────────────────────────────────────────────
+
+// UUIDs matching firmware
+const SVC_UUID        = '0000ab00-0000-1000-8000-00805f9b34fb';
+const CHAR_SELECT     = '0000ab01-0000-1000-8000-00805f9b34fb';
+const CHAR_DISPENSE   = '0000ab02-0000-1000-8000-00805f9b34fb';
+const CHAR_STATUS     = '0000ab03-0000-1000-8000-00805f9b34fb';
+const CHAR_INVENTORY  = '0000ab04-0000-1000-8000-00805f9b34fb';
+const CHAR_AUTH       = '0000ab05-0000-1000-8000-00805f9b34fb';
+const CHAR_ADMIN      = '0000ab06-0000-1000-8000-00805f9b34fb';
+const CHAR_PRICE      = '0000ab07-0000-1000-8000-00805f9b34fb';
+
+let bleDevice = null, bleServer = null, bleChars = {};
+
+async function toggleBLE() {
+  if (bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+    return;
+  }
+  setBleStatus('scanning');
+  log('info', 'Scanning for VendBot-ESP32...');
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'VendBot-ESP32' }],
+      optionalServices: [SVC_UUID]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', onDisconnect);
+    bleServer = await bleDevice.gatt.connect();
+    const svc = await bleServer.getPrimaryService(SVC_UUID);
+    bleChars.select    = await svc.getCharacteristic(CHAR_SELECT);
+    bleChars.dispense  = await svc.getCharacteristic(CHAR_DISPENSE);
+    bleChars.status    = await svc.getCharacteristic(CHAR_STATUS);
+    bleChars.inventory = await svc.getCharacteristic(CHAR_INVENTORY);
+    bleChars.auth      = await svc.getCharacteristic(CHAR_AUTH);
+    bleChars.admin     = await svc.getCharacteristic(CHAR_ADMIN);
+    bleChars.price     = await svc.getCharacteristic(CHAR_PRICE);
+
+    // Subscribe to notifications
+    await bleChars.status.startNotifications();
+    bleChars.status.addEventListener('characteristicvaluechanged', onStatusNotify);
+    await bleChars.inventory.startNotifications();
+    bleChars.inventory.addEventListener('characteristicvaluechanged', onInventoryNotify);
+
+    // Read initial state
+    const invVal = await bleChars.inventory.readValue();
+    for (let i = 0; i < 6; i++) SLOTS[i].count = invVal.getUint8(i);
+    const priceVal = await bleChars.price.readValue();
+    for (let i = 0; i < 6; i++) SLOTS[i].price = priceVal.getUint16(i * 2, true);
+
+    onConnect();
+  } catch (e) {
+    log('err', 'BLE error: ' + e.message);
+    setBleStatus('error');
+    document.getElementById('connect-btn').textContent = 'RETRY CONNECT';
+    document.getElementById('demo-badge').style.display = '';
+  }
+}
+
+function onConnect() {
+  vmState.connected = true;
+  setBleStatus('connected');
+  document.getElementById('connect-btn').textContent = 'DISCONNECT';
+  document.getElementById('demo-badge').style.display = 'none';
+  log('ok', 'Connected to VendBot-ESP32');
+  renderSlots();
+}
+
+function onDisconnect() {
+  vmState.connected = false;
+  setBleStatus('');
+  document.getElementById('connect-btn').textContent = 'SCAN & CONNECT';
+  document.getElementById('demo-badge').style.display = '';
+  log('warn', 'Disconnected from device');
+}
+
+function onStatusNotify(e) {
+  const dv = e.target.value;
+  const state = dv.getUint8(0);
+  const err   = dv.getUint8(1);
+  const selSlot = dv.getUint8(2);
+  const total   = dv.getUint32(8, true);
+  const states  = ['IDLE','SELECTED','DISPENSING','DISPENSED','ERROR','ADMIN'];
+  const errors  = ['NONE','EMPTY','JAM','AUTH','INVALID SLOT'];
+  vmState.state = states[state] || 'UNKNOWN';
+  vmState.error = errors[err] || 'UNKNOWN';
+  vmState.total = total;
+  vmState.selectedSlot = selSlot < 6 ? selSlot : null;
+  updateStatus();
+}
+
+function onInventoryNotify(e) {
+  for (let i = 0; i < 6; i++) SLOTS[i].count = e.target.value.getUint8(i);
+  renderSlots();
+  log('info', 'Inventory updated');
+}
+
+async function bleWrite(char, data) {
+  if (!vmState.connected) return; // demo mode, handled separately
+  try {
+    await bleChars[char].writeValueWithResponse(new Uint8Array(data));
+  } catch(e) { log('err', 'Write failed: ' + e.message); }
+}
+
+// ─── Commands ─────────────────────────────────────────────────────────────
+
+function selectSlot(idx) {
+  if (SLOTS[idx].count === 0) { log('warn', 'Slot ' + (idx+1) + ' is empty'); return; }
+  if (vmState.state === 'DISPENSING') return;
+  vmState.selectedSlot = idx;
+  vmState.state = 'SELECTED';
+  renderSlots();
+  updateStatus();
+  document.getElementById('dispense-btn').disabled = false;
+  log('ok', 'Selected slot ' + (idx+1) + ': ' + SLOTS[idx].name);
+  if (vmState.connected) bleWrite('select', [idx]);
+}
+
+async function sendDispense() {
+  if (vmState.selectedSlot === null) return;
+  const slot = vmState.selectedSlot;
+  vmState.state = 'DISPENSING';
+  updateStatus();
+  document.getElementById('dispense-btn').disabled = true;
+  log('info', 'Dispensing slot ' + (slot+1) + '...');
+
+  if (vmState.connected) {
+    await bleWrite('dispense', [0x01]);
+  } else {
+    // Demo simulation
+    await delay(1800);
+    SLOTS[slot].count = Math.max(0, SLOTS[slot].count - 1);
+    vmState.total++;
+    vmState.state = 'DISPENSED';
+    vmState.selectedSlot = null;
+    updateStatus();
+    renderSlots();
+    log('ok', 'Dispensed ' + SLOTS[slot].name + ' ✓ (demo)');
+    await delay(2000);
+    vmState.state = 'IDLE';
+    updateStatus();
+  }
+}
+
+async function sendAuth() {
+  const pin = document.getElementById('admin-pin').value;
+  if (pin.length !== 4) { log('warn', 'PIN must be 4 digits'); return; }
+  const bytes = pin.split('').map(Number);
+  if (vmState.connected) {
+    await bleWrite('auth', bytes);
+  } else {
+    // Demo: PIN 1234
+    vmState.adminUnlocked = (pin === '1234');
+    vmState.state = vmState.adminUnlocked ? 'ADMIN' : 'ERROR';
+    vmState.error = vmState.adminUnlocked ? 'NONE' : 'AUTH';
+    updateStatus();
+    log(vmState.adminUnlocked ? 'ok' : 'err',
+        vmState.adminUnlocked ? 'Admin authenticated (demo)' : 'Bad PIN');
+  }
+}
+
+async function sendRestock() {
+  const slot  = parseInt(document.getElementById('admin-slot').value);
+  const count = parseInt(document.getElementById('admin-count').value);
+  if (vmState.connected) {
+    await bleWrite('admin', [0x01, slot, count, 0, 0, 0]);
+  } else {
+    SLOTS[slot].count = count;
+    renderSlots();
+    log('ok', `Slot ${slot+1} restocked to ${count} (demo)`);
+  }
+}
+
+async function sendPrice() {
+  const slot  = parseInt(document.getElementById('admin-slot').value);
+  const price = parseInt(document.getElementById('admin-price').value);
+  const lo = price & 0xFF, hi = (price >> 8) & 0xFF;
+  if (vmState.connected) {
+    await bleWrite('admin', [0x02, slot, 0, lo, hi, 0]);
+  } else {
+    SLOTS[slot].price = price;
+    renderSlots();
+    log('ok', `Slot ${slot+1} price → $${(price/100).toFixed(2)} (demo)`);
+  }
+}
+
+async function sendAdminCmd(cmd) {
+  if (vmState.connected) {
+    await bleWrite('admin', [cmd, 0, 0, 0, 0, 0]);
+  } else {
+    const labels = {3:'Error reset', 4:'Machine LOCKED', 5:'Machine UNLOCKED'};
+    if (cmd === 3) { vmState.state = 'IDLE'; vmState.error = 'NONE'; updateStatus(); }
+    log('warn', labels[cmd] + ' (demo)');
+  }
+}
+
+// ─── UI Rendering ──────────────────────────────────────────────────────────
+
+function renderSlots() {
+  const grid = document.getElementById('slot-grid');
+  grid.innerHTML = '';
+  SLOTS.forEach((slot, i) => {
+    const empty = slot.count === 0;
+    const low   = slot.count <= 1 && slot.count > 0;
+    const sel   = vmState.selectedSlot === i;
+    const pct   = (slot.count / 5) * 100;
+
+    const card = document.createElement('div');
+    card.className = 'slot-card' + (sel ? ' selected' : '') + (empty ? ' empty' : '');
+    card.onclick = () => !empty && selectSlot(i);
+    card.innerHTML = `
+      <div class="slot-num">SLOT 0${i+1}</div>
+      <div class="slot-name">${slot.name}</div>
+      <div class="slot-price">$${(slot.price/100).toFixed(2)}</div>
+      <div class="stock-bar">
+        <div class="stock-fill ${low?'low':''} ${empty?'empty':''}"
+             style="width:${pct}%"></div>
+      </div>
+      <div class="slot-stock ${low?'low':''} ${empty?'empty':''}">
+        ${empty ? 'EMPTY' : `×${slot.count}`}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function updateStatus() {
+  document.getElementById('s-state').textContent = vmState.state;
+  document.getElementById('s-slot').textContent  =
+    vmState.selectedSlot !== null ? `SLOT 0${vmState.selectedSlot+1} — ${SLOTS[vmState.selectedSlot]?.name}` : '—';
+  document.getElementById('s-error').textContent = vmState.error;
+  document.getElementById('s-total').textContent = vmState.total;
+  document.getElementById('s-admin').textContent = vmState.adminUnlocked ? 'UNLOCKED' : 'LOCKED';
+
+  // State bar
+  const pips = ['pip-idle','pip-sel','pip-disp','pip-ok','pip-err'];
+  pips.forEach(p => { const el = document.getElementById(p); el.className = 'state-pip'; });
+  const stateMap = { IDLE: 0, SELECTED: 1, DISPENSING: 2, DISPENSED: 3, ERROR: 4, ADMIN: 0 };
+  const idx = stateMap[vmState.state] ?? 0;
+  const pip = document.getElementById(pips[idx]);
+  if (pip) pip.classList.add(vmState.state === 'ERROR' ? 'error' : 'active');
+
+  // Dispense btn
+  const canDispense = vmState.state === 'SELECTED' && vmState.selectedSlot !== null;
+  document.getElementById('dispense-btn').disabled = !canDispense;
+}
+
+function setBleStatus(s) {
+  const dot   = document.getElementById('ble-dot');
+  const label = document.getElementById('ble-label');
+  dot.className = s ? s : '';
+  label.textContent = {
+    connected: 'CONNECTED',
+    scanning:  'SCANNING…',
+    error:     'BLE ERROR',
+  }[s] || 'DISCONNECTED';
+}
+
+// ─── Log ──────────────────────────────────────────────────────────────────
+
+function log(type, msg) {
+  const el = document.getElementById('log-entries');
+  const now = new Date();
+  const ts  = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const row = document.createElement('div');
+  row.className = `log-entry ${type}`;
+  row.innerHTML = `<span class="ts">[${ts}]</span><span class="msg">${msg}</span>`;
+  el.appendChild(row);
+  el.parentElement.scrollTop = el.parentElement.scrollHeight;
+  // Keep max 50 entries
+  while (el.children.length > 50) el.removeChild(el.firstChild);
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+
+renderSlots();
+updateStatus();
+log('info', 'VendBot Controller loaded — DEMO MODE active');
+log('info', 'Click "SCAN & CONNECT" to link real ESP32');
+log('info', 'Admin PIN: 1234 | Select a slot to begin');
+</script>
+
+</body>
+</html>
